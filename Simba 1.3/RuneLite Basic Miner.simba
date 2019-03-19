@@ -1,0 +1,571 @@
+program new;
+//{$define SMART} //If not using SMART, then comment this lineout   Maple rocks: CTS2(13144, 12, 0.21, 0.01)
+{$I SRL/OSR.simba}
+{$I SRL/utils/rsclient.simba}
+{$I SRL/utils/rsclient_overrides.simba}
+{$I RSWalker/Walker.simba}
+{$I playerInfo.simba}
+
+
+label reClickObj, reClickRock;
+
+type
+  TMSObject = record
+    WorldLoc: TPointArray;  //loctions on the world map
+    Color: TCTS2Color;      //must have color
+    MinCount: Int32;        //size of TPA
+    SplitDist: Int32;
+    Uptext: String;
+  end;
+
+const
+  LOGIN_NAME   = PLAYER_NAME;
+  LOGIN_PASS   = PLAYER_PASS;
+  RS_WORLD     = PLAYER_WORLD;           // preferred world, -1 = random world
+  IS_MEMBER    = PLAYER_MEMBER;       // TRUE or FALSE
+  LOCATION     = 'lumb tin';
+  PLAY_STYLE   = 1;
+  MOUSE_X      = 40;
+  MOUSE_Y      = 40;
+  DEBUG_SCRIPT = True;
+
+var
+  invCount: Integer;
+  pBank, toBank, toTree, TPA, path1, path2, area1, area2, nextPath: TPointArray;
+  RSW: TRSWalker;
+  bank, rock: TMSObject;
+  Antiban: TAntiban;
+  check, useFindObj, multiLoc: boolean;
+  clickedRock: TPoint;
+  Timer: TTimeMarker;
+
+procedure declarePlayers();
+begin
+  with Players.New()^ do
+  begin
+    LoginName  := LOGIN_NAME;
+    Password   := LOGIN_PASS;
+    IsActive   := True;
+    IsMember   := IS_MEMBER;
+    World      := RS_WORLD;
+  end;
+  Players.SetCurrent(0);
+end;
+
+procedure DebugScript(Message: String);
+begin
+  if (DEBUG_SCRIPT) then
+    writeln("DEBUG: " + Message);
+end;
+
+function randMove(Point: TPoint; X, Y: Integer): TPoint;
+begin
+  Result.X := Point.X + RandomRange(-X, X);
+  Result.Y := Point.Y + RandomRange(-Y, Y);
+end;
+
+procedure SetupAntiban();
+begin
+  Antiban.Init(SKILL_WOODCUTTING, 4);
+
+  case PLAY_STYLE of
+    0:
+      begin
+        Antiban.AddTask([@Antiban.LoseFocus,     ONE_MINUTE*randomRange(4, 9)]);
+        Antiban.AddTask([@Antiban.HoverPlayers,  ONE_MINUTE*randomRange(10, 30)]);
+        Antiban.AddTask([@Antiban.CheckSkill,    ONE_MINUTE*randomRange(3, 15)]);
+        Antiban.AddTask([@Antiban.CheckStats,    ONE_MINUTE*randomRange(5, 20)]);
+        Antiban.AddTask([@Antiban.OpenRandomTab, ONE_MINUTE*randomRange(20, 60)]);
+        Antiban.AddTask([@Antiban.VeryShortBreak,ONE_MINUTE*randomRange(8, 20)]);
+        Antiban.AddTask([@Antiban.DoMiscStuff,   ONE_MINUTE*randomRange(6, 23)]);
+        Antiban.AddTask([@Antiban.RandomCompass, ONE_MINUTE*randomRange(2, 8)]);
+
+        Antiban.AddBreak([randomRange(10, 20)* ONE_MINUTE, randomRange(4, 9) * ONE_MINUTE, 0.05]);
+        Antiban.AddBreak([randomRange(30, 45) * ONE_MINUTE, randomRange(6, 15) * ONE_MINUTE, 0.15]);
+        Antiban.AddBreak([randomRange(3, 4) * ONE_HOUR,   randomRange(38, 60) * ONE_MINUTE, 0.85]);
+        Antiban.AddBreak([randomRange(8, 12) * ONE_HOUR,   randomRange(12, 16) * ONE_HOUR,   0.99]);
+      end;
+    1:
+      begin
+        Antiban.AddTask([@Antiban.LoseFocus,     ONE_MINUTE*randomRange(15, 30)]);
+        Antiban.AddTask([@Antiban.HoverPlayers,  ONE_MINUTE*randomRange(30, 60)]);
+        Antiban.AddTask([@Antiban.CheckSkill,    ONE_MINUTE*randomRange(10, 30)]);
+        Antiban.AddTask([@Antiban.CheckStats,    ONE_MINUTE*randomRange(20, 45)]);
+        Antiban.AddTask([@Antiban.OpenRandomTab, ONE_MINUTE*randomRange(45, 75)]);
+        Antiban.AddTask([@Antiban.VeryShortBreak,ONE_MINUTE*randomRange(15, 30)]);
+        Antiban.AddTask([@Antiban.DoMiscStuff,   ONE_MINUTE*randomRange(21, 39)]);
+        Antiban.AddTask([@Antiban.RandomCompass, ONE_MINUTE*randomRange(6, 20)]);
+
+        Antiban.AddBreak([randomRange(35, 75)* ONE_MINUTE, randomRange(4, 25) * ONE_MINUTE, 0.5]);
+        Antiban.AddBreak([randomRange(75, 150) * ONE_MINUTE, randomRange(10, 35) * ONE_MINUTE, 0.5]);
+        Antiban.AddBreak([randomRange(4, 6) * ONE_HOUR,   randomRange(38, 120) * ONE_MINUTE, 0.85]);
+        Antiban.AddBreak([randomRange(8, 15) * ONE_HOUR,   randomRange(12, 16) * ONE_HOUR,   0.99]);
+      end;
+    2:
+      begin
+        Antiban.AddTask([@Antiban.LoseFocus,     ONE_MINUTE*randomRange(30, 45)]);
+        Antiban.AddTask([@Antiban.HoverPlayers,  ONE_MINUTE*randomRange(60, 90)]);
+        Antiban.AddTask([@Antiban.CheckSkill,    ONE_MINUTE*randomRange(13, 30)]);
+        Antiban.AddTask([@Antiban.CheckStats,    ONE_MINUTE*randomRange(25, 45)]);
+        Antiban.AddTask([@Antiban.OpenRandomTab, ONE_MINUTE*randomRange(60, 120)]);
+        Antiban.AddTask([@Antiban.VeryShortBreak,ONE_MINUTE*randomRange(18, 45)]);
+        Antiban.AddTask([@Antiban.DoMiscStuff,   ONE_MINUTE*randomRange(36, 75)]);
+        Antiban.AddTask([@Antiban.RandomCompass, ONE_MINUTE*randomRange(23, 40)]);
+
+        Antiban.AddBreak([randomRange(30, 60)* ONE_MINUTE, randomRange(4, 15) * ONE_MINUTE, 0.05]);
+        Antiban.AddBreak([randomRange(60, 100) * ONE_MINUTE, randomRange(9, 25) * ONE_MINUTE, 0.15]);
+        Antiban.AddBreak([randomRange(4, 7) * ONE_HOUR,   randomRange(38, 60) * ONE_MINUTE, 0.85]);
+        Antiban.AddBreak([randomRange(8, 12) * ONE_HOUR,   randomRange(3, 9) * ONE_HOUR,   0.99]);
+      end;
+    end;
+end;
+
+Procedure myAntiban;
+var
+  MSA: TBox;
+  T: TTimeMarker;
+begin
+  if not SRL.isLoggedIn() then Exit;
+
+  SRL.DismissRandom();
+  T.Start;
+  Antiban.DoAntiban();
+  if (T.GetTime() > 15000) then
+    Mainscreen.SetAngle(True);
+  T.Pause;
+  if (T.GetTime() > 500) then
+    SRL.MouseOffClient(3);
+  DebugScript("Time spent in Antiban: " + IntToStr(T.GetTime()));
+end;
+
+function TMSObject.isNotMining(): boolean;
+var
+  loc, me: TPoint;
+  rect: TRectangle;
+  locations, TPA: TPointArray;
+begin
+  me := RSW.GetMyPos();
+  writeln('--');
+  writeln(clickedRock);
+  writeln(me);
+  rect := RSW.GetTileMSEx(me, clickedRock, 1);
+  if MainScreen.GetBounds.Contains(rect.Bounds) then
+  begin
+      Result := srl.CountColor(Color, rect.Bounds) < 215;
+      writeln(srl.CountColor(Color, rect.Bounds));
+  end;
+end;
+
+function SlowMSToMM(MS: TPoint): TPoint;
+var
+  x,y: Int32;
+  best,test: TPoint;
+begin
+  for x:=MM2MS.MMCX-52 to MM2MS.MMCX+52 do
+    for y:=MM2MS.MMCY-52 to MM2MS.MMCY+52 do
+    begin
+      test := Minimap.PointToMs([x,y],0);
+      if Distance(test, MS) < Distance(best, MS) then
+      begin
+        best := test;
+        Result := Point(x,y);
+      end;
+    end;
+end;
+
+function TMSObject.Find(DoSort: Boolean=True; Expand:Int32=0): TRectArray;
+var
+  loc, me: TPoint;
+  rect: TRectangle;
+  locations, TPA: TPointArray;
+  ATPA: T2DPointArray;
+begin
+  me := RSW.GetMyPos();
+  locations := Copy(Self.WorldLoc);
+  if DoSort then Locations.Sorted(me);
+
+  for loc in Locations do
+  begin
+    rect := RSW.GetTileMSEx(me, loc, 1).Expand(Expand);
+    if MainScreen.GetBounds.Contains(rect.Bounds) then
+    begin
+      if (srl.FindColors(TPA, Color, rect.Bounds) < Self.MinCount) then
+        Continue;
+
+      if (Self.SplitDist > 0) then
+      begin
+        TPA  := rect.Filter(TPA);
+        ATPA := TPA.Cluster(Self.SplitDist);
+        ATPA.SortByMiddle(rect.Mean);
+        if (length(ATPA) < 1) then
+          Result += rect.Expand(-Expand)
+        else
+          Result += ATPA[0].MinAreaRect;
+      end else
+        Result += rect.Expand(-Expand);
+    end;
+  end;
+end;
+
+function findObj(obj: TMSObject; doWait: Boolean = false; waitTimeMin: Int32 = 0; waitTimeMax: Int32 = 0): boolean;
+var
+  i, j: Int32;
+  rectangles: array of TRectangle;
+  Retry: boolean;
+begin
+  rectangles := obj.Find(True,1);
+  for i to High(rectangles) do
+  begin
+    myAntiban();
+
+    if doWait then
+      wait(randomRange(waitTimeMin, waitTimeMax));
+
+    if (MainScreen.GetBounds.Contains(rectangles[i].Bounds)) then
+    begin
+      reClickObj:
+      myAntiban();
+      mouse.Move(rectangles[i]);
+      if MainScreen.IsUpText(obj.Uptext) then
+      begin
+        if Mouse.Click(ctRed) then
+        begin
+          clickedRock :=(SlowMSToMM(Mouse.GetPosition()) - Point(MM2MS.MMCX, MM2MS.MMCY)) + RSW.GetMyPos();
+          SRL.MouseOffClient(3);
+          Result := True;
+          Break;
+        end else if (not Retry) then
+        begin
+          Retry := true;
+          goto reClickObj;
+        end else
+          Retry := false;
+      end;
+    end;
+  end;
+end;
+
+function findObjColours(Colour: TCTS2Color; FiltSizeMin, FiltSizeMax: Integer; Uptext : String) : boolean;
+var
+  TPA, x : TPointArray;
+  ATPA : T2DPointArray;
+  Retry : Boolean;
+begin
+  if (SRL.FindColors(TPA, Colour, MainScreen.GetBounds) > 0) then
+  begin
+    ATPA := TPA.Cluster(2);
+    ATPA.FilterSize(FiltSizeMin, FiltSizeMax);
+    ATPA.SortByIndex(MainScreen.GetMiddle);
+
+    if (length(ATPA) >= 0) then
+    begin
+      for x in ATPA do
+      begin
+        reClickRock:
+        Mouse.Move(randMove(MiddleTPA(x), 20, 20));
+        if MainScreen.IsUpText(Uptext) then
+        begin
+          if Mouse.Click(ctRed) then
+          begin
+            SRL.MouseOffClient(3);
+            Break;
+          end else if (not Retry) then
+          begin
+            Retry := true;
+            goto reClickRock;
+          end else Retry := false;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function playerInArea(area : TPointArray): Boolean;
+var
+  myPos: TPoint;
+  areaBox: TBox;
+begin
+  myPos := RSW.GetMyPos();
+  areaBox := [area[0].X, area[0].Y, area[1].X, area[1].Y];
+  if (myPos.InBox(areaBox)) then
+  begin
+    Result := True;
+  end else
+    Result := False;
+end;
+
+procedure pathSwitch();
+begin
+  if (playerInArea(area1)) then
+    nextPath := path1
+  else nextPath := path2;
+end;
+
+(*
+  Waits until your player is finished moving, while calling move event.
+*)
+procedure TRSWalker.WaitPlayerMovingSearch(Obj: TMSObject; TimeOut: Int32 = 30000);
+var
+  T: UInt64;
+begin
+  T := GetTickCount() + TimeOut;
+
+  while (T > GetTickCount()) and (Self.Enabled) do
+  begin
+    myAntiban();
+    if findObj(Obj) then
+    begin
+      check := True;
+      myAntiban;
+      break;
+    end;
+
+    if Assigned(@Self.OnMoveEvent) then
+      Self.OnMoveEvent(@Self);
+
+    if (not Minimap.isFlagPresent()) and (not Minimap.isPlayerMoving(Self.MinimapShift)) then
+      Break;
+    Wait(Random(50, 100));
+  end;
+end;
+
+(*
+ Walks a path.. returns true if we successfully walked the path, otherwise false.
+
+ One hook is used here:
+ - onWalkEvent(self, myPos);
+*)
+function TRSWalker.WalkPathSearch(Path: TPointArray; Obj: TMSObject; ClickRnd:Int32=4; FinalCorrection:Boolean=False): Boolean;
+var
+  i,j,h,prev,tmp,attempts: Int32;
+  nearest,distance: Double;
+  mmPos, myPos: TPoint;
+  t: TCountDown;
+
+  function RandomizeRunEnergy(e:Int32):Int32;
+  begin
+    if e > 100 then Exit();
+    Result := Random(max(5,e-10), e+10);
+  end;
+begin
+  // If using SIMBA 1.2, uncomment the next two lines.
+  //if Length(worldMap) = 0 then
+  //  RaiseException('TRSWalker.WalkPath -> RSWalker is not set up for this task!');
+
+  // If Using SIMBA 1.3, uncomment the next two lines.
+  if Self.WorldMap = nil then
+    RaiseException('TRSWalker.WalkPath -> RSWalker is not set up for this task!');
+
+  self.Enabled := True;
+  tmp := self.MinRunEnergy;
+
+  // get start point in path
+  myPos := Self.GetMyPos();
+  nearest := 100000;
+  for j:=0 to High(path) do
+  begin
+    distance := Hypot(path[j].x-myPos.x, path[j].y-myPos.y);
+    if (distance < nearest) then
+    begin
+      nearest := distance;
+      i := j;
+    end;
+  end;
+
+  // generate a dense path from starting point
+  FPath := Copy(path, i, Length(path)-i);
+  FPath := RSWUtils.BuildPath([myPos]+FPath, 1,6);
+
+  // do the walk
+  t.Init(Random(23000, 27000));
+  FPathIdx := 0;
+  H := High(FPath);
+  while (FPathIdx < H) and (not t.IsFinished())  do
+  begin
+    myAntiban;
+    self.minRunEnergy := RandomizeRunEnergy(self.minRunEnergy);
+    myPos := Self.GetMyPos();
+
+    if not Self.ScreenWalk then
+    begin
+      while (FPathIdx < H) and (Hypot(myPos.x-FPath[FPathIdx+1].x, myPos.y-FPath[FPathIdx+1].y) < MM_RAD) do
+        Inc(FPathIdx);
+    end else
+    begin
+      while (FPathIdx < H) and Mainscreen.FBounds.Contains(Minimap.PointToMs(FPath[FPathIdx+1] - myPos + minimap.Center)) do
+        Inc(FPathIdx);
+    end;
+
+    if prev = FPathIdx then
+    begin
+      Inc(attempts);
+      if attempts > 7 then
+      begin
+        self.MinRunEnergy := tmp;
+        Exit(False);
+      end;
+    end else
+      attempts := 0;
+
+    mmPos := FPath[FPathIdx] - myPos + minimap.Center;
+
+    if Assigned(@self.onWalkEvent) then
+    begin
+      self.onWalkEvent(@self, myPos);
+      if not(self.Enabled) then
+      begin
+        self.MinRunEnergy := tmp;
+        Exit(True);
+      end;
+    end;
+
+    self.WalkToPos(mmPos, ClickRnd, FPathIdx<>h);
+    if not(self.Enabled) then
+    begin
+      self.MinRunEnergy := tmp;
+      Exit(True);
+    end;
+
+    prev := FPathIdx;
+    t.Init(Random(20000, 25000));
+  end;
+
+  self.WaitPlayerMovingSearch(Obj);
+  myPos  := Self.GetMyPos();
+  Result := Hypot(myPos.x-FPath[h].x, myPos.y-FPath[h].y) < 16;
+
+  if Result and FinalCorrection then
+  begin
+    distance := Hypot(myPos.x-FPath[h].x, myPos.y-FPath[h].y);
+    if (distance < MM_RAD) and (distance > 6) then
+    begin
+      mmPos.x := (FPath[h].x - myPos.x) + Minimap.Center.X;
+      mmPos.y := (FPath[h].y - myPos.y) + Minimap.Center.Y;
+      self.WalkToPos(mmPos, 1, True);
+      self.WaitPlayerMoving();
+    end;
+  end;
+
+  self.minRunEnergy := tmp;
+end;
+
+function doBanking(): boolean;
+var
+  T: TTimeMarker;
+begin
+  T.start;
+  while ((not Bankscreen.IsOpen()) and (T.GetTime() < 20000)) do
+    wait(250);
+  if (not Bankscreen.IsOpen()) then
+    exit(false);
+  wait(randomRange(156, 360));
+  Bankscreen.DepositAll();
+  wait(randomRange(156, 660));
+  case random(14) of
+    0: begin
+         Bankscreen.Close();
+         wait(randomRange(156, 660));
+       end;
+  end;
+  Result := True;
+end;
+
+procedure loadVars();
+var
+  map: String;
+begin
+  case lowercase(LOCATION) of
+    'lumb tin':
+      begin
+        map := 'world[5_6].png';
+        rock := [[[125, 25], [121, 28], [125, 32]], CTS2(6053222, 11, 0.16, 0.05), 15, 8, 'Rocks'];
+        useFindObj := true;
+        multiLoc := false;
+      end;
+
+    'lumb copper':
+      begin
+        map := 'world.png';
+        rock := [[[4726, 3856], [4730, 3860]], CTS2(2112605, 15, 0.04, 0.14), 15, 8, 'Rocks'];
+        useFindObj := true;
+        multiLoc := false;
+      end;
+
+    'edgeville yew':
+      begin
+        map := 'world[3_5].png';
+        toBank := [Point(317, 262), Point(328, 264), Point(342, 260), Point(346, 253), Point(345, 242), Point(342, 221), Point(336, 202), Point(325, 191), Point(342, 180)];
+        toTree := [Point(342, 180), Point(325, 191), Point(336, 202), Point(342, 221), Point(345, 242), Point(346, 253), Point(342, 260), Point(328, 264), Point(317, 262)];
+        path1 := [Point(316, 258), Point(316, 247), Point(315, 232), Point(315, 221)];
+        path2 := [Point(315, 221), Point(315, 232), Point(316, 247), Point(316, 258)];
+        area1 := [Point(295, 243), Point(344, 280)];
+        area2 := [Point(293, 204), Point(337, 237)];
+        rock := [[[310, 221], [314, 221], [318, 221], [318, 217], [314, 217], [310, 217], [310, 214], [314, 214], [310, 270], [314, 270], [314, 266], [310, 266], [310, 262], [314, 262]], CTS2(2313803, 12, 0.15, 1.75), 15, 8, 'Yew'];
+        bank := [[[351, 189], [351, 180], [355, 172], [363, 172]], CTS2(5264986, 3, 0.84, 0.97), 15, 8, 'Bank booth'];
+        useFindObj := true;
+        multiLoc := true;
+      end;
+    end;
+
+  RSW.Init(map, -1);
+  Inventory.ShiftDrop := true;
+end;
+
+procedure setupScript();
+begin
+  RS_CLIENT_TITLES.Append('RuneLite');
+  clearDebug();;
+  srl.SetupForClient([]);
+  RSClient.SetFocus();
+
+  loadVars();
+
+  SetupAntiban();
+  declarePlayers();
+  if (not SRL.isLoggedIn) then
+  begin
+     Players.LoginCurrent();
+     Mainscreen.SetAngle(True);
+  end;
+
+  invCount := Inventory.Count();
+  Timer.Start;
+
+end;
+
+procedure mainLoop();
+begin
+  findObj(rock);
+  while (not inventory.IsFull()) do
+  begin
+    if ((not rock.isNotMining()) and (invCount = Inventory.Count()) and (Timer.GetTime() < 30000)) then
+    begin
+      myAntiban;
+    end else
+    if (rock.isNotMining() or (invCount <> Inventory.Count()) or (Timer.GetTime() > 30000)) then
+    begin
+      invCount := Inventory.Count();
+      Timer.reset;
+      Timer.Start;
+      if (useFindObj) then
+        findObj(rock);
+    end;
+  end;
+
+  Inventory.DropItems(DROP_PATTERN_SNAKE);
+  findObj(rock, True, 256, 986);
+  Timer.reset;
+
+end;
+
+begin
+  setupScript();
+  repeat
+    //writeln(SRL.IsAnimating([244, 143, 267, 184], 1, 300));
+    //writeln(srl.GetPixelShift([244, 143, 267, 184], 300));
+
+    //rock.isMining();
+    wait(randomRange(500, 2000));
+    mainLoop();
+  until(false);
+end.
